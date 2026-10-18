@@ -1,0 +1,22 @@
+[Unit]
+Description=Codex browser workbench
+After=network-online.target codex-engine.service codex-updater.service
+Wants=codex-engine.service codex-updater.service
+
+[Service]
+Type=simple
+User=codexweb
+Group=codexweb
+Slice=codex-workbench.slice
+EnvironmentFile=/etc/codex-workbench.env
+WorkingDirectory=/opt/codex-workbench/current
+ExecStart=/opt/codex-workbench/runtime/bin/node --max-old-space-size=384 server/index.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=20
+KillMode=control-group
+UMask=0077
+LogNamespace=codex-workbench
+
+[Install]
+WantedBy=multi-user.target

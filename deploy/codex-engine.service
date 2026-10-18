@@ -1,0 +1,24 @@
+[Unit]
+Description=Codex native app-server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=codexweb
+Group=codexweb
+Slice=codex-workbench.slice
+EnvironmentFile=/etc/codex-workbench.env
+WorkingDirectory=/var/lib/codex-workbench
+ExecStart=/opt/codex-workbench/bin/start-engine.sh
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+KillMode=control-group
+RuntimeDirectory=codex-workbench
+RuntimeDirectoryMode=0700
+UMask=0077
+LogNamespace=codex-workbench
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+DOMAIN_PLACEHOLDER {
+    encode zstd gzip
+    request_body {
+        max_size 85MB
+    }
+    reverse_proxy 127.0.0.1:47832
+}

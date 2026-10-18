@@ -1,0 +1,46 @@
+name: Build and publish
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Publish package.json version as a stable release
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      PACKAGE_WORK_DIR: ${{ runner.temp }}/package-work
+      PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/release
+      TEST_TMPDIR: ${{ runner.temp }}/tests
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24.19.0
+      - run: npm install --global pnpm@11.25.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build && pnpm test
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:browser
+      - run: pnpm package
+      - name: Verify packaged release
+        run: node scripts/verify.mjs "$PACKAGE_WORK_DIR/package-stage/codex-workbench"
+      - name: Publish stable release
+        if: github.event_name == 'push' || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(node -p 'JSON.parse(require("fs").readFileSync("package.json","utf8")).version')
+          if gh release view "v$VERSION" >/dev/null 2>&1; then echo "Version already published; increment package.json to publish another release"; exit 0; fi
+          gh release create "v$VERSION" "$PACKAGE_OUTPUT_DIR/codex-workbench-$VERSION.tar.gz" "$PACKAGE_OUTPUT_DIR/codex-workbench-$VERSION.tar.gz.sha256" --target "$GITHUB_SHA" --title "Codex Workbench $VERSION" --generate-notes

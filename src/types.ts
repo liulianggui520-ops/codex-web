@@ -1,0 +1,9 @@
+export type Project={id:string;name:string;path:string};
+export type Item={id:string;type:string;text?:string;content?:any[];command?:string;status?:string;aggregatedOutput?:string;changes?:any[];[key:string]:any};
+export type Turn={id:string;status:string;items:Item[];error?:any};
+export type Thread={id:string;name?:string;preview:string;cwd:string;pinned?:boolean;projectId?:string;status?:{type:string};updatedAt?:number;[key:string]:any};
+export type Approval={id:string;method:string;params:any};
+export type Job={id:string;thread:string;project:string;status:string;result?:any};
+export type TerminalInfo={id:string;projectId:string;status:string;output:string;version?:number};
+export type Attachment={name:string;path:string;image:boolean};
+export type Preferences={theme:'light'|'dark';sidebar:number;inspector:number;terminal:number};

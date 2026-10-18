@@ -1,0 +1,10 @@
+[Unit]
+Description=Codex workbench resource budget
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh=2560M
+MemoryMax=3072M
+CPUAccounting=yes
+CPUQuota=300%
+TasksMax=512

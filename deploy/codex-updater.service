@@ -1,0 +1,30 @@
+[Unit]
+Description=Codex workbench release updater
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=codexweb
+Slice=codex-workbench.slice
+EnvironmentFile=/etc/codex-workbench.env
+WorkingDirectory=/opt/codex-workbench/updater
+ExecStart=/opt/codex-workbench/runtime/bin/node --max-old-space-size=192 server/update-daemon.mjs
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=codex-workbench-updater
+RuntimeDirectoryMode=0750
+StateDirectory=codex-workbench-updater
+StateDirectoryMode=0700
+UMask=0022
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/opt/codex-workbench /var/lib/codex-workbench-updater
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LogNamespace=codex-workbench
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,3 @@
+import { defineConfig } from '@playwright/test';
+import { resolve } from 'node:path';
+export default defineConfig({testDir:'tests/browser',fullyParallel:false,workers:1,timeout:30000,expect:{timeout:10000},outputDir:resolve('../..','work','browser-results'),use:{baseURL:'http://127.0.0.1:47834',viewport:{width:1440,height:1000},launchOptions:{executablePath:process.env.PLAYWRIGHT_EXECUTABLE_PATH||(process.platform==='win32'?'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe':undefined)},screenshot:'only-on-failure'},webServer:{command:'node tests/preview.mjs',url:'http://127.0.0.1:47834/healthz',reuseExistingServer:false,timeout:30000}});

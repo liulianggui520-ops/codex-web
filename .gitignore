@@ -1,0 +1,15 @@
+node_modules/
+dist/
+runtime/
+test-results/
+playwright-report/
+.env
+*.tar.gz
+
+.env.*
+!.env.example
+*.sqlite*
+*.log
+release.json
+coverage/
+work/

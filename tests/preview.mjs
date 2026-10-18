@@ -1,0 +1,18 @@
+import { mkdir,mkdtemp,writeFile,rm } from 'node:fs/promises';
+import { resolve,join,relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import { createApp } from '../server/index.mjs';
+import { passwordHash } from '../server/auth.mjs';
+import { FakeRpc } from './fake-rpc.mjs';
+const work=resolve(fileURLToPath(new URL('../../../work/',import.meta.url)));await mkdir(work,{recursive:true});
+const base=await mkdtemp(join(work,'browser-fixture-')),root=join(base,'example-project');await mkdir(root);
+await writeFile(join(root,'README.md'),'# Example project\n\nA small project for browser verification.\n');await writeFile(join(root,'app.js'),'console.log("Hello, Codex");\n');
+execFileSync('git',['init','-b','main',root],{stdio:'ignore'});
+const rpc=new FakeRpc(root);rpc.autoComplete=true;
+const app=await createApp({rpc,config:{dataDir:join(base,'state'),roots:[root],cwd:root,origin:'http://127.0.0.1:47834'}});
+app.store.set('credential',await passwordHash('test-password-12345678'));const project=await app.files.register(root,'example-project');
+const result=await app.workbench.create({projectId:project.id});const thread=rpc.chats.get(result.thread.id);thread.name='已有原生会话';thread.preview='已有原生会话';thread.turns=[{id:'seed-turn',status:'completed',items:[{id:'seed-user',type:'userMessage',content:[{type:'text',text:'查看当前项目'}]},{id:'seed-answer',type:'agentMessage',text:'这是已经保存的原生历史。\n\n| 文件 | 用途 |\n| --- | --- |\n| README.md | 项目说明 |\n\n```js\nconsole.log("Hello, Codex");\n```'}]}];
+const other=join(root,'other-project');await mkdir(other);const otherProject=await app.files.register(other,'z-other-project');const otherChat=await app.workbench.create({projectId:otherProject.id});rpc.chats.get(otherChat.thread.id).name='其他项目会话';
+await new Promise(r=>app.server.listen(47834,'127.0.0.1',r));console.log('Browser fixture ready on 127.0.0.1:47834');
+async function close(){await app.close();if(relative(work,base).startsWith('browser-fixture-'))await rm(base,{recursive:true,force:true});process.exit(0);}process.on('SIGINT',close);process.on('SIGTERM',close);
