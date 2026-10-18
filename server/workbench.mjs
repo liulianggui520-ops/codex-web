@@ -22,6 +22,7 @@ export class Workbench {
     });
     rpc.on('ready', () => events.push('connection', { connected: true }));
     this.idleTimer = setInterval(() => this.releaseIdle(), 60000); this.idleTimer.unref();
+    this.recoveryTimer=setInterval(()=>{if(this.rpc.ready&&!this.closing&&this.store.jobs().some(j=>['running','uncertain'].includes(j.status)))this.reconcile().then(()=>this.drain()).catch(()=>{});},5000);this.recoveryTimer.unref();
   }
   async connect() { await this.rpc.connect(); return this.rpc; }
   async supported(method, params = {}) { if (!this.methods.includes(method)) throw fail(501, '当前 Codex 版本未提供此功能'); return (await this.connect()).call(method, params); }
@@ -72,10 +73,16 @@ export class Workbench {
       pending: [...this.pending.values()].filter(r => r.params.threadId === threadId).map(r => ({ ...r, id: r.key })) };
   }
   hasJob(threadId) { return this.store.jobs().some(j => j.thread === threadId && ['queued','starting','running','uncertain'].includes(j.status)); }
+  removeProject(projectId) {
+    this.files.project(projectId);
+    check(!this.store.jobs().some(j=>j.project===projectId&&['queued','starting','running','uncertain'].includes(j.status))&&![...this.terminals.values()].some(t=>t.projectId===projectId&&['running','starting'].includes(t.status))&&![...this.threadMutations].some(thread=>this.store.binding(thread)===projectId),'请先完成或取消此项目的任务，并结束终端，再删除项目',409);
+    this.store.removeProject(projectId);for(const [thread,loaded]of this.loaded)if(loaded.projectId===projectId)this.loaded.delete(thread);this.pinScans.clear();
+    this.events.push('projects/changed',{removed:projectId});this.events.push('threads/changed',{});return {ok:true};
+  }
   async bind(threadId, projectId) {
     check(!this.threadMutations.has(threadId) && !this.hasJob(threadId), '请先处理此会话的运行、排队或待确认任务再绑定项目',409);
     this.threadMutations.add(threadId);
-    try { const native = await this.thread(threadId); check(native.status?.type !== 'active','请先停止正在运行的任务',409); await this.files.resolve(projectId); this.store.bind(threadId, projectId); this.loaded.delete(threadId); return { ok: true }; }
+    try { const native = await this.thread(threadId); check(native.status?.type !== 'active','请先停止正在运行的任务',409); await this.files.resolve(projectId);this.files.project(projectId); this.store.bind(threadId, projectId); this.loaded.delete(threadId); return { ok: true }; }
     finally { this.threadMutations.delete(threadId); }
   }
   async resolveProject(threadId, projectId) {
@@ -85,6 +92,7 @@ export class Workbench {
     if (!bound) {
       let original; try { original = await realpath(native.cwd); } catch {}
       check(original === project.path, '会话原项目路径不可用，请先绑定到服务器项目', 409);
+      this.files.project(project.id);
       this.store.bind(threadId, project.id);
     }
     await this.files.resolve(project.id); return project;
@@ -106,6 +114,7 @@ export class Workbench {
     else params.sandbox = input.sandbox === 'read-only' ? 'read-only' : 'workspace-write';
     if (input.model) params.model = input.model;
     const result = await this.supported('thread/start', params);
+    this.files.project(project.id);
     this.store.bind(result.thread.id, project.id); this.loaded.set(result.thread.id, { time: Date.now(), projectId: project.id, model: result.model });
     this.events.push('threads/changed', {}); return result;
   }
@@ -119,6 +128,7 @@ export class Workbench {
       check(!busy, '请等待当前任务完成后分叉',409);
       const project = await this.resolveProject(threadId, input.projectId);
       const result = await this.supported('thread/fork', { threadId, cwd: project.path, excludeTurns: true, ...(input.lastTurnId ? { lastTurnId: text(input.lastTurnId,200) } : {}) });
+      this.files.project(project.id);
       this.store.bind(result.thread.id, project.id); return result;
     }
     if (input.action === 'compact') { check(!busy, '请等待当前任务完成后压缩上下文',409); const project = await this.resolveProject(threadId); await this.ensureThread(threadId,project); return this.supported('thread/compact/start', { threadId }); }
@@ -171,6 +181,7 @@ export class Workbench {
     check(this.store.jobs().length < 100, '任务队列已满，请先处理已有任务',409);
     check(!this.hasJob(threadId), '此会话已有任务，运行中请使用追加指令',409);
     check(this.store.binding(threadId) === project.id, '会话项目绑定已变化，请重新提交',409);
+    this.files.project(project.id);
     const job = { id: input.requestId, thread: threadId, project: project.id, payload: input, created: Date.now() };
     this.store.enqueue(job); this.events.push('queue/changed', { jobs: this.store.jobs() }); this.drain();
     return this.store.submission(job.id);
@@ -180,10 +191,11 @@ export class Workbench {
     this.draining = true;
     try {
       const summary = this.store.jobs().find(j => j.status === 'queued'); if (!summary) return;
-      const job = this.store.submission(summary.id), project = this.files.project(job.project);
+      const job = this.store.submission(summary.id),epoch=this.epoch;
       this.store.updateJob(job.id,'starting');
       let sent = false;
       try {
+        const project=this.files.project(job.project);
         check(this.store.binding(job.thread) === job.project, '排队任务的项目绑定已变化，任务未启动',409);
         await this.files.resolve(project.id);
         await this.connect(); await this.ensureThread(job.thread,project);
@@ -193,10 +205,11 @@ export class Workbench {
         const result = job.payload.review
           ? await this.rpc.call('review/start', { threadId: job.thread, delivery: 'inline', target: { type: 'uncommittedChanges' } })
           : await this.rpc.call('turn/start', params);
-        if(this.closing)return;
-        if (this.completed.get(job.thread) === result.turn.id || result.turn.status !== 'inProgress') { this.active.delete(job.thread); this.store.updateJob(job.id,'completed',{ turnId: result.turn.id }); }
+        if(this.closing||epoch!==this.epoch)return;
+        if(!['starting','running','uncertain'].includes(this.store.submission(job.id)?.status))return;
+        if (this.completed.get(job.thread) === result.turn.id || result.turn.status !== 'inProgress') { this.active.delete(job.thread); this.store.updateJob(job.id,result.turn.status==='completed'?'completed':'interrupted',{ turnId: result.turn.id,error:result.turn.error?.message }); }
         else { this.active.set(job.thread,{ jobId: job.id, turnId: result.turn.id }); this.store.updateJob(job.id,'running',{ turnId: result.turn.id }); }
-      } catch (error) { if(this.closing)return;this.active.delete(job.thread); this.store.updateJob(job.id, sent ? 'uncertain' : 'failed', { error: error.message }); this.events.push('job/error',{ id: job.id, message: error.message },job.thread); }
+      } catch (error) { if(this.closing)return;const current=this.store.submission(job.id);if(!['starting','running','uncertain'].includes(current?.status))return;if(this.active.get(job.thread)?.jobId===job.id)this.active.delete(job.thread); this.store.updateJob(job.id, sent ? 'uncertain' : 'failed', {...current.result, error: error.message }); this.events.push('job/error',{ id: job.id, message: error.message },job.thread); }
       this.events.push('queue/changed',{ jobs: this.store.jobs() });
     } finally { this.draining = false; if (!this.maintenance && !this.closing && !this.active.size && !this.store.jobs().some(j => j.status === 'uncertain') && this.store.jobs().some(j => j.status === 'queued')) setImmediate(() => this.drain()); }
   }
@@ -206,28 +219,46 @@ export class Workbench {
   }
   async reconcileJobs() {
     const epoch=this.epoch;
-    for (const job of this.store.jobs().filter(j => j.status === 'uncertain')) {
-      if (!job.result?.turnId) continue;
-      const native = await this.thread(job.thread);
-      if(this.closing||epoch!==this.epoch)break;
-      if(this.store.submission(job.id)?.status!=='uncertain')continue;
-      if (native.status?.type !== 'active') this.store.updateJob(job.id,'interrupted',{ ...job.result, error: '连接中断后引擎未报告任务仍在运行；请检查历史后决定下一步' });
-      else {
-        const page=await this.supported('thread/turns/list',{threadId:job.thread,limit:1,sortDirection:'desc',itemsView:'none'});
+    for (const job of this.store.jobs().filter(j => ['running','uncertain'].includes(j.status))) {
+      try {
+        const native=await this.thread(job.thread),page=await this.supported('thread/turns/list',{threadId:job.thread,limit:1,sortDirection:'desc',itemsView:job.result?.turnId?'none':'full'});
         if(this.closing||epoch!==this.epoch)break;
-        if(this.store.submission(job.id)?.status!=='uncertain'||this.completed.get(job.thread)===job.result.turnId)continue;
-        if(page.data[0]?.id===job.result.turnId&&page.data[0]?.status==='inProgress'){
-          this.active.set(job.thread,{jobId:job.id,turnId:job.result.turnId});this.store.updateJob(job.id,'running',job.result);
+        const current=this.store.submission(job.id);if(!['running','uncertain'].includes(current?.status))continue;
+        const turn=page.data[0],turnId=current.result?.turnId??(turn?.items?.some(i=>i.type==='userMessage'&&i.clientId===job.id)?turn.id:null);
+        if(turnId&&turn?.id===turnId&&['completed','interrupted','failed'].includes(turn.status)){
+          this.store.updateJob(job.id,turn.status==='completed'?'completed':'interrupted',{turnId,error:turn.error?.message});
+          if(this.active.get(job.thread)?.jobId===job.id)this.active.delete(job.thread);
+          this.events.push('queue/reconciled',{turnId,status:turn.status},job.thread);
+        }else if(turnId&&turn?.id===turnId&&turn.status==='inProgress'&&native.status?.type==='active'){
+          if(this.completed.get(job.thread)===turnId)continue;
+          this.active.set(job.thread,{jobId:job.id,turnId});this.store.updateJob(job.id,'running',{...current.result,turnId});
           try { await this.ensureThread(job.thread,this.files.project(job.project)); }
-          catch (error) { if(!this.closing&&this.active.get(job.thread)?.jobId===job.id){this.active.delete(job.thread);this.store.updateJob(job.id,'uncertain',{...job.result,error:error.message});} }
+          catch(error){if(!this.closing&&epoch===this.epoch&&this.active.get(job.thread)?.jobId===job.id){this.active.delete(job.thread);this.store.updateJob(job.id,'uncertain',{...current.result,turnId,error:error.message});}}
+        }else if(native.status?.type!=='active'&&turn?.status!=='inProgress'){
+          // An idle native thread proves there is no live task, but cannot prove what an unacknowledged request did.
+          this.store.updateJob(job.id,'interrupted',{...current.result,error:'引擎已无运行任务；请查看会话历史。原请求不会自动重发。'});
+          if(this.active.get(job.thread)?.jobId===job.id)this.active.delete(job.thread);
+          this.events.push('queue/reconciled',{turnId:current.result?.turnId,status:'interrupted'},job.thread);
         }
-      }
+      }catch(error){if(this.closing||epoch!==this.epoch)break;/* Keep uncertain requests visible; another failed read must never resend work. */}
     }
     if(this.closing)return [];this.events.push('queue/changed',{ jobs: this.store.jobs() }); return this.store.jobs();
   }
   async jobAction(jobId, action) {
     const job = this.store.submission(jobId); check(job, '任务不存在',404);
-    if (action === 'cancel') {
+    if(action==='stop-current'){
+      check(job.status==='uncertain'&&!job.result?.turnId,'仅适用于无法确认任务 ID 的记录',409);
+      const page=await this.supported('thread/turns/list',{threadId:job.thread,limit:1,sortDirection:'desc',itemsView:'none'}),turn=page.data[0];
+      if(turn?.status==='inProgress'){
+        await this.supported('turn/interrupt',{threadId:job.thread,turnId:turn.id});
+        const after=await this.supported('thread/turns/list',{threadId:job.thread,limit:1,sortDirection:'desc',itemsView:'none'});
+        check(!after.data.some(t=>t.status==='inProgress'),'已请求停止，请等待引擎确认后刷新任务状态',409);
+      }
+      const native=await this.thread(job.thread);check(native.status?.type!=='active','此会话仍有活动任务，请刷新后重试',409);
+      if(this.active.get(job.thread)?.jobId===job.id)this.active.delete(job.thread);
+      this.store.updateJob(jobId,'cancelled',job.result);
+      this.events.push('queue/reconciled',{turnId:turn?.id,status:'interrupted'},job.thread);
+    }else if (action === 'cancel') {
         check(['queued','running','uncertain','interrupted'].includes(job.status),'任务状态不可取消',409);
         if (['running','uncertain'].includes(job.status)) {
           const native = await this.thread(job.thread);
@@ -245,14 +276,15 @@ export class Workbench {
         }
         if(this.active.get(job.thread)?.jobId===job.id)this.active.delete(job.thread);
         this.store.updateJob(jobId,'cancelled',job.result);
-    } else if (action === 'acknowledge') { check(['uncertain','interrupted'].includes(job.status),'任务状态不匹配',409); const native = await this.thread(job.thread); check(native.status?.type !== 'active', '引擎仍报告任务正在运行，请先停止',409); this.store.updateJob(jobId,'acknowledged',job.result); }
+    } else if (action === 'acknowledge') { check(['uncertain','interrupted'].includes(job.status),'任务状态不匹配',409); const native = await this.thread(job.thread); check(native.status?.type !== 'active', '引擎仍报告任务正在运行，请先停止',409);if(this.active.get(job.thread)?.jobId===job.id)this.active.delete(job.thread); this.store.updateJob(jobId,'acknowledged',job.result); }
     else throw fail(400,'不支持这个任务操作');
     this.events.push('queue/changed',{ jobs: this.store.jobs() }); this.drain(); return {};
   }
   async steer(threadId, input) {
-    const active = this.active.get(threadId); check(active?.turnId, '当前没有可追加指令的任务',409);
+    await this.reconcile();const active = this.active.get(threadId); check(active?.turnId, '任务已结束，状态已刷新，请重新发送这条消息',409);
     const project = await this.resolveProject(threadId); const params = await this.turnParams(threadId,project,input);
-    return this.supported('turn/steer', { threadId, expectedTurnId: active.turnId, input: params.input });
+    try{return await this.supported('turn/steer', { threadId, expectedTurnId: active.turnId, input: params.input });}
+    catch(error){if(/no active turn|not.*active turn|turn.*not.*active/i.test(error.message)){await this.reconcile();throw fail(409,'任务刚刚结束，已刷新状态；输入内容已保留，请重新发送');}throw error;}
   }
   async stop(threadId) {
     let active = this.active.get(threadId);
@@ -265,7 +297,7 @@ export class Workbench {
     if(['thread/archived','thread/unarchived','thread/name/updated','thread/closed'].includes(method))this.pinScans.clear();
     const threadId = params.threadId ?? params.thread?.id ?? null;
     if (method === 'turn/started') {
-      const active = this.active.get(threadId); if (active) active.turnId = params.turn.id;
+      const active = this.active.get(threadId); if (active&&!active.turnId) {active.turnId=params.turn.id;const job=this.store.submission(active.jobId);if(job&&['starting','running','uncertain'].includes(job.status)){this.store.updateJob(job.id,'running',{...job.result,turnId:params.turn.id});this.events.push('queue/changed',{jobs:this.store.jobs()});}}
     }
     if (method === 'turn/completed') {
       this.completed.set(threadId,params.turn.id);
@@ -368,5 +400,5 @@ export class Workbench {
       try { await this.supported('thread/unsubscribe',{ threadId }); this.loaded.delete(threadId); } catch {}
     }
   }
-  close() { this.closing = true; clearInterval(this.idleTimer); this.rpc.close(); }
+  close() { this.closing = true; clearInterval(this.idleTimer);clearInterval(this.recoveryTimer); this.rpc.close(); }
 }

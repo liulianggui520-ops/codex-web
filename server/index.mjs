@@ -60,6 +60,7 @@ export async function createApp(options = {}) {
           if (pathname === '/api/v2/updates') {result=await updates.request();if(!applyPending&&!result.busy){applying=false;workbench.maintenance=false;}}
           else if (pathname === '/api/v2/capabilities') result = await workbench.capabilities();
           else if (pathname === '/api/v2/projects') result = { projects:store.projects() };
+          else if (pathname === '/api/v2/projects/directories') result=await files.directories(query.directory,query.q);
           else if (pathname === '/api/v2/threads') result = await workbench.list(query);
           else if (parts[0] === 'threads' && parts.length === 2) result = await workbench.history(parts[1],query.cursor);
           else if (pathname === '/api/v2/queue') result = { jobs:store.jobs() };
@@ -87,6 +88,7 @@ export async function createApp(options = {}) {
           else if (pathname === '/api/v2/connect') { await workbench.connect(); await workbench.reconcile(); workbench.drain(); result = { connected:true }; }
           else if (pathname === '/api/v2/preferences') { const preferences = { theme:input.theme === 'light' ? 'light' : 'dark', sidebar:Math.max(200,Math.min(400,Number(input.sidebar)||250)), inspector:Math.max(280,Math.min(700,Number(input.inspector)||360)), terminal:Math.max(150,Math.min(600,Number(input.terminal)||230)) }; store.set('preferences',preferences); result = preferences; }
           else if (pathname === '/api/v2/projects') { result = await files.register(input.directory,input.name); events.push('projects/changed',{}); }
+          else if (parts[0]==='projects'&&parts.length===3&&parts[2]==='remove') result=workbench.removeProject(parts[1]);
           else if (pathname === '/api/v2/threads') result = await workbench.create(input);
           else if (parts[0] === 'threads' && parts.length === 3) {
             const thread = parts[1];
@@ -97,6 +99,7 @@ export async function createApp(options = {}) {
             else if (parts[2] === 'stop') result = await workbench.stop(thread);
             else matched = false;
           }
+          else if (pathname==='/api/v2/queue/reconcile') {await workbench.reconcile();workbench.drain();result={jobs:store.jobs()};}
           else if (parts[0] === 'queue' && parts.length === 2) result = await workbench.jobAction(parts[1],input.action);
           else if (parts[0] === 'approvals' && parts.length === 2) result = await workbench.answer(parts[1],input);
           else if (pathname === '/api/v2/files/save') { result = await files.save(input.projectId,input.path,input.text,input.etag); events.push('files/changed',{ projectId:input.projectId, path:input.path }); }

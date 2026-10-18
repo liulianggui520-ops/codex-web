@@ -38,6 +38,14 @@ try{
   const history=(await request(`/threads/${t.id}`)).data;
   const executed=history.turns.flatMap(t=>t.items).some(i=>i.type==='commandExecution'&&String(i.command).includes('proof.cjs')&&String(i.aggregatedOutput).includes('CODEX_WORKBENCH_OK'));
   if(!executed)throw new Error('Native history did not confirm the model ran the test command');
-  const report={ok:true,platform:process.platform,project,threadId:t.id,readViaAPI:true,fileModified:true,diffVerified:true,modelTestExecutionVerified:true,independentTestPassed:true,approvals:approved,completedAt:new Date().toISOString()};
+  let sequentialTurnsVerified=false;
+  if(process.env.SMOKE_TWO_TURNS==='1'){
+    const secondId=randomBytes(16).toString('hex');await request(`/threads/${t.id}/turns`,{requestId:secondId,projectId:p.id,text:'现在验证同一会话可继续下一条任务。不要修改文件或调用工具，只回复 QUEUE_NEXT_OK。'});
+    const secondDeadline=Date.now()+120000;let second;
+    while(Date.now()<secondDeadline){second=app.store.submission(secondId);if(['completed','failed','interrupted','uncertain'].includes(second.status))break;await delay(500);}
+    if(second?.status!=='completed')throw new Error(`Second task did not complete: ${JSON.stringify(second?.result)}`);
+    const nextHistory=(await request(`/threads/${t.id}`)).data;if(!nextHistory.turns.flatMap(turn=>turn.items).some(item=>item.type==='agentMessage'&&String(item.text).includes('QUEUE_NEXT_OK')))throw new Error('Second task reply missing');sequentialTurnsVerified=true;
+  }
+  const report={ok:true,platform:process.platform,project,threadId:t.id,readViaAPI:true,fileModified:true,diffVerified:true,modelTestExecutionVerified:true,independentTestPassed:true,sequentialTurnsVerified,approvals:approved,completedAt:new Date().toISOString()};
   await writeFile(join(base,'report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
 }finally{app.events.removeAllListeners('event');await app.close();}

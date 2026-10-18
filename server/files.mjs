@@ -19,6 +19,20 @@ export class Files {
     const old = this.store.projects().find(p => p.path === root); if (old) return old;
     return this.store.addProject({ id: id(), name: text(name || path.basename(root), 100), path: root });
   }
+  async directories(directory=this.roots[0],query='') {
+    const allowed=await Promise.all(this.roots.map(r=>realpath(r))),candidate=path.resolve(text(directory,4096));
+    check(allowed.some(root=>inside(root,candidate))||this.roots.some(root=>inside(path.resolve(root),candidate)),'目录不在允许的工作目录内',403);
+    const canonical=await realpath(candidate);check(allowed.some(root=>inside(root,canonical)),'符号链接指向工作目录外',403);
+    check((await stat(canonical)).isDirectory(),'请选择服务器目录');
+    const search=text(query,100).toLocaleLowerCase(),entries=[];let scanned=0,truncated=false;
+    for await(const entry of await opendir(canonical)){
+      if(++scanned>5000){truncated=true;break;}
+      if(!entry.isDirectory()||entry.isSymbolicLink()||entry.name==='.git'||entry.name==='node_modules'||!entry.name.toLocaleLowerCase().includes(search))continue;
+      if(entries.length===200){truncated=true;break;}entries.push({name:entry.name,path:path.join(canonical,entry.name)});
+    }
+    entries.sort((a,b)=>a.name.localeCompare(b.name));const parent=path.dirname(canonical);
+    return {directory:canonical,parent:parent!==canonical&&allowed.some(root=>inside(root,parent))?parent:null,roots:allowed,entries,truncated};
+  }
   async resolve(projectId, relative = '', create = false) {
     const project = this.project(projectId), root = await realpath(project.path);
     check(root === project.path, '项目根目录已被替换，请重新注册项目',403);

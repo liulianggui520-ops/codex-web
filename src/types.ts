@@ -1,4 +1,4 @@
-export type Project={id:string;name:string;path:string};
+export type Project={id:string;name:string;path:string;removed?:boolean};
 export type Item={id:string;type:string;text?:string;content?:any[];command?:string;status?:string;aggregatedOutput?:string;changes?:any[];[key:string]:any};
 export type Turn={id:string;status:string;items:Item[];error?:any};
 export type Thread={id:string;name?:string;preview:string;cwd:string;pinned?:boolean;projectId?:string;status?:{type:string};updatedAt?:number;[key:string]:any};

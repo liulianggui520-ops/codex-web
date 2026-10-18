@@ -8,6 +8,7 @@ import { FakeRpc } from './fake-rpc.mjs';
 const work=resolve(fileURLToPath(new URL('../../../work/',import.meta.url)));await mkdir(work,{recursive:true});
 const base=await mkdtemp(join(work,'browser-fixture-')),root=join(base,'example-project');await mkdir(root);
 await writeFile(join(root,'README.md'),'# Example project\n\nA small project for browser verification.\n');await writeFile(join(root,'app.js'),'console.log("Hello, Codex");\n');
+await mkdir(join(root,'quick-project'));await writeFile(join(root,'quick-project','README.md'),'# Quick directory project\n');
 execFileSync('git',['init','-b','main',root],{stdio:'ignore'});
 const rpc=new FakeRpc(root);rpc.autoComplete=true;
 const app=await createApp({rpc,config:{dataDir:join(base,'state'),roots:[root],cwd:root,origin:'http://127.0.0.1:47834'}});

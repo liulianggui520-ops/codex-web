@@ -5,6 +5,7 @@ import net from 'node:net';
 import WebSocket from 'ws';
 import { readFile } from 'node:fs/promises';
 import { fail } from './util.mjs';
+import {version} from './release.mjs';
 export class Rpc extends EventEmitter {
   constructor(config) { super(); this.config = config; this.pending = new Map(); this.next = 1; this.ready = false; this.connecting = null; this.transport = null; }
   async connect() {
@@ -32,7 +33,7 @@ export class Rpc extends EventEmitter {
       createInterface({ input: child.stdout }).on('line', line => { if(this.transport===child)this.receive(line); });
       this.write = message => child.stdin.write(JSON.stringify(message) + '\n');
     }
-    this.info = await this.call('initialize', { clientInfo: { name: 'codex_workbench', title: 'Codex Web Workbench', version: '2.0.0' }, capabilities: { experimentalApi: true, mcpServerOpenaiFormElicitation: true } }, 20000);
+    this.info = await this.call('initialize', { clientInfo: { name: 'codex_workbench', title: 'Codex Web Workbench', version }, capabilities: { experimentalApi: true, mcpServerOpenaiFormElicitation: true } }, 20000);
     this.write({ method: 'initialized', params: {} }); this.ready = true;
     this.emit('ready'); return this;
     } catch (error) {

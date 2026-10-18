@@ -20,6 +20,11 @@ export class Store {
   projects() { return this.db.prepare('SELECT * FROM projects ORDER BY name').all(); }
   project(id) { return this.db.prepare('SELECT * FROM projects WHERE id=?').get(id); }
   addProject(project) { this.db.prepare('INSERT INTO projects VALUES(?,?,?)').run(project.id, project.name, project.path); return project; }
+  removeProject(id) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try { this.db.prepare('DELETE FROM bindings WHERE project=?').run(id);this.db.prepare('DELETE FROM projects WHERE id=?').run(id);this.db.exec('COMMIT'); }
+    catch(error){this.db.exec('ROLLBACK');throw error;}
+  }
   binding(thread) { return this.db.prepare('SELECT project FROM bindings WHERE thread=?').get(thread)?.project; }
   bind(thread, project) { this.db.prepare('INSERT INTO bindings VALUES(?,?) ON CONFLICT(thread) DO UPDATE SET project=excluded.project').run(thread, project); }
   pin(thread, pinned) { if (pinned) this.db.prepare('INSERT OR IGNORE INTO pins VALUES(?)').run(thread); else this.db.prepare('DELETE FROM pins WHERE thread=?').run(thread); }
