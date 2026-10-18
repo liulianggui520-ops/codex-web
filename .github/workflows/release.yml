@@ -19,15 +19,16 @@ jobs:
     timeout-minutes: 20
     permissions:
       contents: write
-    env:
-      PACKAGE_WORK_DIR: ${{ runner.temp }}/package-work
-      PACKAGE_OUTPUT_DIR: ${{ runner.temp }}/release
-      TEST_TMPDIR: ${{ runner.temp }}/tests
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 24.19.0
+      - name: Configure temporary directories
+        run: |
+          echo "PACKAGE_WORK_DIR=$RUNNER_TEMP/package-work" >> "$GITHUB_ENV"
+          echo "PACKAGE_OUTPUT_DIR=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
+          echo "TEST_TMPDIR=$RUNNER_TEMP/tests" >> "$GITHUB_ENV"
       - run: npm install --global pnpm@11.25.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm build && pnpm test
