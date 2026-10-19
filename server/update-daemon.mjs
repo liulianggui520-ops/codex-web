@@ -2,12 +2,12 @@ import http from 'node:http';
 import {execFile} from 'node:child_process';
 import {promisify} from 'node:util';
 import {rm,chmod,chown} from 'node:fs/promises';
-import {setTimeout as delay} from 'node:timers/promises';
 import {Updater} from './update-core.mjs';
+import {waitWebHealth} from './update-health.mjs';
 const run=promisify(execFile),socket='/run/codex-workbench-updater/control.sock';
 const updater=new Updater({base:'/opt/codex-workbench',state:'/var/lib/codex-workbench-updater',
   control:action=>run('/usr/bin/systemctl',[action,'codex-web.service'],{timeout:45000,maxBuffer:65536}),
-  async health(manifest){for(let i=0;i<30;i++){try{const response=await fetch('http://127.0.0.1:47832/healthz',{headers:{Host:new URL(process.env.PUBLIC_ORIGIN).host},signal:AbortSignal.timeout(1500)}),data=await response.json();if(response.ok&&data.ok&&(!manifest||(data.releaseId===manifest.releaseId&&data.version===manifest.version)))return true;}catch{}await delay(1000);}return false;}
+  health:manifest=>waitWebHealth({origin:process.env.PUBLIC_ORIGIN,manifest,onFailure:message=>console.error(`Web health check failed: ${message}`)})
 });
 await updater.recover();await rm(socket,{force:true});
 const gid=Number((await run('/usr/bin/id',['-g','codexweb'])).stdout.trim());

@@ -15,6 +15,8 @@ import { Events } from '../server/events.mjs';
 import { FakeRpc } from './fake-rpc.mjs';
 import { Rpc } from '../server/rpc.mjs';
 import {updateSocket} from './helpers/update-socket.mjs';
+import {probeWebHealth} from '../server/update-health.mjs';
+import {version,release} from '../server/release.mjs';
 const exec=promisify(execFile),scratch=resolve(process.env.TEST_TMPDIR||fileURLToPath(new URL('../../../work/',import.meta.url)));
 async function waitFor(predicate,message){
   const deadline=Date.now()+5000;
@@ -30,6 +32,16 @@ async function harness(options={}){
   async function cleanup(){await app.close();const rel=relative(scratch,base);assert.ok(rel.startsWith('workbench-test-')&&!rel.includes('..'));await rm(base,{recursive:true,force:true});}
   return{app,rpc,root,base,origin,request,login,cleanup,get cookie(){return cookie;}};
 }
+test('updater health works through real app Host validation without bypassing it',async()=>{
+  const h=await harness();try{
+    const origin='https://workbench.example';h.app.auth.origin=new URL(origin);
+    // The public Host is required even for loopback probes; the old fetch probe fails.
+    assert.equal((await fetch(h.origin+'/healthz',{headers:{Host:new URL(origin).host}})).status,403);
+    assert.equal((await probeWebHealth({origin,port:new URL(h.origin).port,manifest:{version,releaseId:release.releaseId}})).ok,true);
+    assert.equal((await probeWebHealth({origin:'https://wrong.example',port:new URL(h.origin).port})).ok,false);
+  }finally{await h.cleanup();}
+});
+
 test('real updater HTTP socket permits connect, account capabilities, queue reconciliation and approval responses',async()=>{
   const requests=[];
   const socket=await updateSocket(async(req,res)=>{

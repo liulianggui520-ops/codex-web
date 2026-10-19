@@ -9,8 +9,8 @@
 支持 Ubuntu / Debian，x86_64 或 arm64，以及 systemd。域名 A/AAAA 记录应指向服务器，腾讯云安全组与主机防火墙应允许 80、443 入站；不要开放 47832 或引擎 socket。
 
 ```bash
-sha256sum -c codex-workbench-2.1.4.tar.gz.sha256
-tar -xzf codex-workbench-2.1.4.tar.gz
+sha256sum -c codex-workbench-2.1.5.tar.gz.sha256
+tar -xzf codex-workbench-2.1.5.tar.gz
 cd codex-workbench
 sudo bash deploy/install.sh --domain codex.example.com
 ```
@@ -85,6 +85,26 @@ sudo -u codexweb env \
 服务器运行时使用 `/var/lib/codex-workbench/codex` 作为 `CODEX_HOME`。请在引擎停止时完成你自己的迁移，并保持数据归 `codexweb` 用户所有。Windows 原路径可能不存在；网页中打开该会话，点击“绑定到当前服务器项目”，然后继续对话。旧消息中的绝对路径不会被重写。
 
 ## GitHub 与网页更新
+
+### 2.1.5：修复健康检查误判与遗留回滚事务
+
+如果网页报“更新与回滚健康检查均失败”，但诊断的 curl 健康检查正常、日志显示新版启动约30秒后又切回旧版，请手动修复固定安装的 root 更新服务。旧探针在 Node 24 下使用 fetch，公共 Host 被替换为回环地址，触发网页的主机校验403。2.1.5 改用原生 HTTP 并保留公共 Host、超时、响应大小及版本校验；不放宽主机或登录校验。
+
+从 [v2.1.5 Release](https://github.com/liulianggui520-ops/codex-web/releases/tag/v2.1.5) 下载 `.tar.gz` 和 `.sha256`，校验并解压，在**新版** `codex-workbench` 目录依次执行：
+
+```bash
+sudo bash deploy/repair-updater.sh
+sudo bash deploy/upgrade.sh
+sudo bash /opt/codex-workbench/current/deploy/diagnose.sh
+```
+
+第一步先验证发布清单、备份并修复更新服务，让它处理遗留事务，等待控制 socket 和回滚后的网页恢复。第一步成功后才能执行第二步升级网页；不要手动删除 transaction.json，也不要颠倒顺序，否则旧事务可能把新网页再次撤回。恢复到2.1.3时网页客户端还可能有旧的更新请求故障，因此第二步使用手动升级脚本。
+
+修复脚本保留更新事务、网页数据、原生历史、登录资料和引擎；恢复可能短暂重启网页。执行前结束任务和终端。同为已锁定的 Codex CLI 0.159.3、引擎路径不变时，升级脚本无需重启引擎。备份路径会打印在终端，失败时保留诊断输出。
+
+仅通过网页安装新版不会替换 `/opt/codex-workbench/updater` 中的 root 服务；已有旧更新服务的服务器必须执行上述手动步骤一次。首次使用2.1.5安装脚本的新服务器已包含修复。
+
+### 2.1.4：更新客户端 HTTP 请求修复
 
 2.1.4 修复启用更新服务时状态 GET 携带 JSON 请求体，导致“连接 Codex”、任务核对和审批报 `Unexpected end of JSON input` 的问题。状态 GET 不再发送请求体，POST 明确声明 UTF-8 字节长度；空响应、非 JSON 和失败响应会显示 HTTP 状态码。
 

@@ -97,7 +97,7 @@ install -m 0644 "$SOURCE/deploy/codex-engine.service" /etc/systemd/system/codex-
 install -m 0644 "$SOURCE/deploy/codex-web.service" /etc/systemd/system/codex-web.service
 # Root updater is fixed at installation time; downloaded releases never replace its code.
 install -d -m 0755 "$BASE/updater/server"
-cp "$SOURCE/server/"{update-daemon,update-core,release}.mjs "$BASE/updater/server/"
+cp "$SOURCE/server/"{update-daemon,update-core,update-health,release}.mjs "$BASE/updater/server/"
 cp "$SOURCE/package.json" "$BASE/updater/package.json"
 cp -a "$SOURCE/node_modules" "$BASE/updater/"
 chown -R root:root "$BASE/updater"

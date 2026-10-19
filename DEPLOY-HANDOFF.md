@@ -30,4 +30,6 @@
 
 ## GitHub 更新入口
 
+已有服务器出现“更新与回滚健康检查均失败”、curl健康正常而新版约30秒后回滚时，先下载并验证2.1.5或更新发布包。在解压的新版目录先执行 `sudo bash deploy/repair-updater.sh`；该脚本等待更新服务恢复事务、控制socket就绪及当前版本健康检查通过。成功后再执行 `sudo bash deploy/upgrade.sh`。不要删除 transaction.json，也不要先运行 upgrade.sh，避免遗留事务将刚装好的版本撤回。不能仅依赖恢复到2.1.3后的网页更新入口。最后运行 diagnose.sh，确认网页版本、更新服务和无遗留事务；不重置Codex账号或原生历史。
+
 从 https://github.com/liulianggui520-ops/codex-web/releases 获取安装包及 .sha256；不要下载 Source code 当安装包。首次安装必须使用 2.1.0 或更新安装脚本，创建 codex-updater 服务。检查 /run/codex-workbench-updater/control.sock 权限为 root:codexweb 0660，不开放网络端口，不给网页用户 sudo 权限。网页设置内检查并安装更新；所有待运行任务、终端结束后才允许更新。更新只覆盖网页发布目录，更新服务、引擎、登录信息、项目及原生历史保持独立。
