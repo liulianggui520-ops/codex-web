@@ -28,11 +28,13 @@ async function harness(options={}){
 test('authentication, origin/CSRF, token redaction and websocket session revocation',async()=>{
   const h=await harness();try{
     assert.equal((await h.request('/api/v2/projects')).status,401);
+    assert.equal((await h.request('/api/v2/account/limits')).status,401);
     assert.equal((await h.request('/api/v2/auth/login',{password:'test-password-12345678'},{Origin:'https://evil.example'})).status,403);
     assert.equal((await h.request('/api/v2/auth/login',{password:'wrong'})).status,401);
     const login=await h.login();assert.match(login.headers.get('set-cookie'),/HttpOnly; SameSite=Strict/);
     assert.equal((await h.request('/api/v2/projects',{directory:h.root},{'X-CSRF-Token':'bad'})).status,403);
     const caps=await h.request('/api/v2/capabilities');assert.equal(caps.status,200);assert.ok(!JSON.stringify(caps.data).includes('never-return'));
+    const quota=await h.request('/api/v2/account/limits');assert.equal(quota.status,200);assert.equal(quota.data.rateLimits.primary.windowDurationMins,300);
     const client=new WebSocket(h.origin.replace('http:','ws:')+'/ws',{origin:h.origin,headers:{Cookie:h.cookie}});await new Promise((r,j)=>{client.once('open',r);client.once('error',j);});
     const closed=new Promise(r=>client.once('close',r));await h.request('/api/v2/auth/logout',{});await closed;assert.equal((await h.request('/api/v2/projects')).status,401);
     await h.login();for(let i=0;i<10;i++)await h.request('/api/v2/auth/login',{password:'wrong'});assert.equal((await h.request('/api/v2/auth/login',{password:'wrong'})).status,429);

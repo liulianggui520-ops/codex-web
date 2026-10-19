@@ -59,6 +59,7 @@ export async function createApp(options = {}) {
         if (req.method === 'GET') {
           if (pathname === '/api/v2/updates') {result=await updates.request();if(!applyPending&&!result.busy){applying=false;workbench.maintenance=false;}}
           else if (pathname === '/api/v2/capabilities') result = await workbench.capabilities();
+          else if (pathname === '/api/v2/account/limits') result=redact(await workbench.supported('account/rateLimits/read',{}));
           else if (pathname === '/api/v2/projects') result = { projects:store.projects() };
           else if (pathname === '/api/v2/projects/directories') result=await files.directories(query.directory,query.q);
           else if (pathname === '/api/v2/threads') result = await workbench.list(query);

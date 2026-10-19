@@ -8,7 +8,7 @@ export class FakeRpc extends EventEmitter {
     if(method==='collaborationMode/list')return{data:[{name:'Plan',mode:'plan',model:'fixture-model'}]};
     if(method==='permissionProfile/list')return{data:[{id:'read-only',allowed:true,description:'只读'}]};
     if(method==='account/read')return{account:{type:'chatgpt',email:'owner@example.test',accessToken:'never-return-this-token'}};
-    if(method==='account/rateLimits/read')return{rateLimits:{primary:{usedPercent:15}}};
+    if(method==='account/rateLimits/read')return{rateLimits:{limitId:'codex',primary:{usedPercent:15,windowDurationMins:300,resetsAt:Math.floor(Date.now()/1000)+10800},secondary:{usedPercent:40,windowDurationMins:10080}}};
     if(method==='configRequirements/read')return{requirements:null};
     if(method==='thread/start'||method==='thread/fork') {
       const thread={id:`chat-${++this.counter}`,name:null,preview:'新会话',cwd:params.cwd??this.root,status:{type:'idle'},turns:[],historyMode:'paginated',updatedAt:Date.now()/1000};this.chats.set(thread.id,thread);return{thread,model:'fixture-model'};
