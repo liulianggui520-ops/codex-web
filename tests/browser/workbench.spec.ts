@@ -102,6 +102,19 @@ test('mobile project directory shortcuts stay usable and deleting a project pres
 test('a stale running snapshot cannot revive a completed response or force the next message to steer',async({page})=>{
   let stream:any;await page.routeWebSocket('**/ws',ws=>{stream=ws;ws.connectToServer();});await page.reload();await page.getByRole('button',{name:'已有原生会话',exact:true}).click();await expect(page.getByText('这是已经保存的原生历史。')).toBeVisible();await page.route('**/api/v2/threads/chat-1?*',async route=>{const response=await route.fetch(),data=await response.json();data.thread.status={type:'active'};data.turns[0].status='inProgress';await route.fulfill({response,json:data});});stream.send(JSON.stringify({type:'sync',payload:{gap:true,seq:0,events:[]}}));await expect(page.locator('.turn-footer').getByText('正在处理…')).not.toBeVisible();await page.getByRole('textbox',{name:'给 Codex 的任务'}).fill('completed snapshot next message');await expect(page.getByRole('button',{name:'发送任务',exact:true})).toBeEnabled();let steers=0;page.on('request',req=>{if(req.url().endsWith('/steer'))steers++;});await page.getByRole('button',{name:'发送任务',exact:true}).click();await expect(page.getByText('连接成功。',{exact:true})).toBeVisible();expect(steers).toBe(0);
 });
+test('sending waits for pending new chat creation and preserves the draft',async({page})=>{
+  let release!:()=>void,started!:()=>void,created=0,submitted=0;
+  const gate=new Promise<void>(resolve=>release=resolve),requested=new Promise<void>(resolve=>started=resolve);
+  await page.route('**/api/v2/threads',async route=>{if(route.request().method()!=='POST')return route.continue();created++;const response=await route.fetch();started();await gate;await route.fulfill({response});});
+  await page.route('**/api/v2/threads/*/turns',route=>{submitted++;return route.continue();});
+  await page.getByRole('button',{name:'新建会话',exact:true}).click();await requested;
+  const input=page.getByRole('textbox',{name:'给 Codex 的任务'});await input.fill('draft during new chat creation');
+  await expect(page.getByRole('button',{name:'发送任务',exact:true})).toBeDisabled();await input.press('Control+Enter');
+  await expect(input).toHaveValue('draft during new chat creation');expect(created).toBe(1);expect(submitted).toBe(0);
+  release();await page.getByRole('button',{name:'发送任务',exact:true}).click();await expect(input).toHaveValue('');
+  await expect(page.getByText('连接成功。',{exact:true})).toBeVisible();expect(created).toBe(1);expect(submitted).toBe(1);
+});
+
 test('two successive tasks finish without leaving the conversation in steer mode',async({page})=>{
   await page.getByRole('button',{name:'新建会话',exact:true}).click();for(const text of ['first successive task','second successive task']){await page.getByRole('textbox',{name:'给 Codex 的任务'}).fill(text);await page.getByRole('button',{name:'发送任务',exact:true}).click();await expect(page.getByRole('button',{name:'停止任务',exact:true})).not.toBeVisible();await expect(page.getByRole('textbox',{name:'给 Codex 的任务'})).toHaveValue('');}await expect(page.getByText('连接成功。',{exact:true})).toHaveCount(2);
 });
