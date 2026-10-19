@@ -14,6 +14,7 @@ import { passwordHash } from '../server/auth.mjs';
 import { Events } from '../server/events.mjs';
 import { FakeRpc } from './fake-rpc.mjs';
 import { Rpc } from '../server/rpc.mjs';
+import {updateSocket} from './helpers/update-socket.mjs';
 const exec=promisify(execFile),scratch=resolve(process.env.TEST_TMPDIR||fileURLToPath(new URL('../../../work/',import.meta.url)));
 async function harness(options={}){
   await mkdir(scratch,{recursive:true});const base=await mkdtemp(join(scratch,'workbench-test-')),root=join(base,'projects');await mkdir(root);const rpc=new FakeRpc(root);
@@ -25,6 +26,28 @@ async function harness(options={}){
   async function cleanup(){await app.close();const rel=relative(scratch,base);assert.ok(rel.startsWith('workbench-test-')&&!rel.includes('..'));await rm(base,{recursive:true,force:true});}
   return{app,rpc,root,base,origin,request,login,cleanup,get cookie(){return cookie;}};
 }
+test('real updater HTTP socket permits connect, account capabilities, queue reconciliation and approval responses',async()=>{
+  const requests=[];
+  const socket=await updateSocket(async(req,res)=>{
+    const chunks=[];for await(const chunk of req)chunks.push(chunk);
+    requests.push({method:req.method,path:req.url,bytes:Buffer.concat(chunks).length});
+    res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({enabled:true,busy:false}));
+  });
+  let h;
+  try{
+    h=await harness({updates:socket.client});await h.login();
+    const connected=await h.request('/api/v2/connect',{});assert.equal(connected.status,200);assert.equal(connected.data.connected,true);
+    const caps=await h.request('/api/v2/capabilities');assert.equal(caps.status,200);assert.equal(caps.data.account.type,'chatgpt');assert.ok(caps.data.models.some(m=>m.model==='fixture-model'));
+    assert.equal((await h.request('/api/v2/updates')).status,200);
+    assert.equal((await h.request('/api/v2/queue/reconcile',{})).status,200);
+    h.rpc.emit('request',{id:94,method:'item/commandExecution/requestApproval',params:{threadId:'x',availableDecisions:['accept','decline']}});
+    const key=[...h.app.workbench.pending.keys()][0];assert.ok(key);
+    assert.equal((await h.request(`/api/v2/approvals/${key}`,{decision:'decline'})).status,200);
+    assert.deepEqual(h.rpc.replies.at(-1),{id:94,result:{decision:'decline'}});
+    assert.equal(requests.length,4);assert.ok(requests.every(r=>r.method==='GET'&&r.path==='/status'&&r.bytes===0));
+  }finally{if(h)await h.cleanup();await socket.close();}
+});
+
 test('authentication, origin/CSRF, token redaction and websocket session revocation',async()=>{
   const h=await harness();try{
     assert.equal((await h.request('/api/v2/projects')).status,401);

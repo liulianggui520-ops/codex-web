@@ -86,3 +86,11 @@ Astra 独立审查并迭代修复同目录重复点击、项目删除与首次�
 30/30 浏览器测试通过，覆盖桌面/手机、5小时与周窗口区分、模型专用额度、稀疏更新后补读、时间已过仍保留实际0%、无窗口与失败时的上次数据。26/26 核心测试通过，包含未登录额度接口401和登录后读取。GitHub发布流水线另执行完整后端与更新测试。
 
 真实本机 Codex 原生接口只读验收通过：实际返回300分钟和10080分钟窗口，5小时窗口具有使用比例和重置时间。未记录或公开具体用量、账号或凭据。Astra 独立复核未发现实际P1/P2，桌面和手机布局正常。腾讯云使用其服务用户登录的账号额度，仍需安装新版后验收。
+
+## 2.1.4 更新客户端 HTTP 请求修复（2026-10-20）
+
+先用真实 HTTP Socket 在旧实现上复现 `Unexpected end of JSON input`，再验证修复后状态 GET 无请求体、无 JSON 请求头；check/apply POST 发送 Content-Length，中文及 emoji 的长度按 UTF-8 字节计算。覆盖空/空白响应、非 JSON、JSON 错误、HTTP 状态码、64KiB 字节上限及截断响应。
+
+新增真实 UpdateClient + HTTP Socket 的 API 回归：已登录后 /api/v2/connect 返回 connected=true，capabilities 可读取 ChatGPT 账号和模型，updates、queue/reconcile 及审批回复均返回200。仅 Codex RPC 使用测试替身；更新客户端和 Node HTTP 解析器未模拟。Windows 使用命名管道，Linux 使用临时 Unix socket。
+
+本地构建通过；后端43项测试中41项通过，2项既有 Linux 专属更新测试在 Windows 跳过。GitHub Ubuntu 发布流水线将执行完整后端、30项浏览器测试及发布包校验。用户提供的目标服务器验证结论未计入本地测试；本轮没有访问或修改腾讯云服务器、原生引擎或登录资料。

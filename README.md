@@ -9,8 +9,8 @@
 支持 Ubuntu / Debian，x86_64 或 arm64，以及 systemd。域名 A/AAAA 记录应指向服务器，腾讯云安全组与主机防火墙应允许 80、443 入站；不要开放 47832 或引擎 socket。
 
 ```bash
-sha256sum -c codex-workbench-2.1.3.tar.gz.sha256
-tar -xzf codex-workbench-2.1.3.tar.gz
+sha256sum -c codex-workbench-2.1.4.tar.gz.sha256
+tar -xzf codex-workbench-2.1.4.tar.gz
 cd codex-workbench
 sudo bash deploy/install.sh --domain codex.example.com
 ```
@@ -85,6 +85,10 @@ sudo -u codexweb env \
 服务器运行时使用 `/var/lib/codex-workbench/codex` 作为 `CODEX_HOME`。请在引擎停止时完成你自己的迁移，并保持数据归 `codexweb` 用户所有。Windows 原路径可能不存在；网页中打开该会话，点击“绑定到当前服务器项目”，然后继续对话。旧消息中的绝对路径不会被重写。
 
 ## GitHub 与网页更新
+
+2.1.4 修复启用更新服务时状态 GET 携带 JSON 请求体，导致“连接 Codex”、任务核对和审批报 `Unexpected end of JSON input` 的问题。状态 GET 不再发送请求体，POST 明确声明 UTF-8 字节长度；空响应、非 JSON 和失败响应会显示 HTTP 状态码。
+
+如果 2.1.3 的网页安装按钮也因此失败，请从 [v2.1.4 Release](https://github.com/liulianggui520-ops/codex-web/releases/tag/v2.1.4) 下载 `.tar.gz` 和 `.sha256`，按上方步骤校验、解压后，在新版 `codex-workbench` 目录执行 `sudo bash deploy/upgrade.sh`。先结束任务和终端。此版本继续锁定 Codex CLI 0.159.3，已安装相同引擎时升级脚本无需重启引擎或重新登录；网页服务会重启。已经在服务器修复此问题的用户可正常使用网页更新。
 
 源码与发布地址：[liulianggui520-ops/codex-web](https://github.com/liulianggui520-ops/codex-web)。首次安装从 Releases 下载对应的 tar.gz 和 sha256 文件；请勿将 GitHub 的 Source code 压缩包当作安装包，它不含预构建前端和运行时依赖。
 
