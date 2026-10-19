@@ -94,3 +94,5 @@ Astra 独立审查并迭代修复同目录重复点击、项目删除与首次�
 新增真实 UpdateClient + HTTP Socket 的 API 回归：已登录后 /api/v2/connect 返回 connected=true，capabilities 可读取 ChatGPT 账号和模型，updates、queue/reconcile 及审批回复均返回200。仅 Codex RPC 使用测试替身；更新客户端和 Node HTTP 解析器未模拟。Windows 使用命名管道，Linux 使用临时 Unix socket。
 
 本地构建通过；后端43项测试中41项通过，2项既有 Linux 专属更新测试在 Windows 跳过。GitHub Ubuntu 发布流水线将执行完整后端、30项浏览器测试及发布包校验。用户提供的目标服务器验证结论未计入本地测试；本轮没有访问或修改腾讯云服务器、原生引擎或登录资料。
+
+首次 Ubuntu 流水线中新增真实 Socket 测试通过，原有队列串行测试在固定40ms等待后过早断言。该测试改为等待实际 running/interrupted 状态并设置5秒超时；不改变生产队列实现，仍检查任务顺序和启动次数。

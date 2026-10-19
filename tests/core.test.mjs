@@ -16,6 +16,10 @@ import { FakeRpc } from './fake-rpc.mjs';
 import { Rpc } from '../server/rpc.mjs';
 import {updateSocket} from './helpers/update-socket.mjs';
 const exec=promisify(execFile),scratch=resolve(process.env.TEST_TMPDIR||fileURLToPath(new URL('../../../work/',import.meta.url)));
+async function waitFor(predicate,message){
+  const deadline=Date.now()+5000;
+  while(!predicate()){assert.ok(Date.now()<deadline,message);await delay(10);}
+}
 async function harness(options={}){
   await mkdir(scratch,{recursive:true});const base=await mkdtemp(join(scratch,'workbench-test-')),root=join(base,'projects');await mkdir(root);const rpc=new FakeRpc(root);
   const app=await createApp({rpc,updates:options.updates,config:{dataDir:join(base,'state'),roots:[root],cwd:root}});app.store.set('credential',await passwordHash('test-password-12345678'));
@@ -80,19 +84,20 @@ test('file root confinement, symlink rejection, optimistic saves and bounded upl
 test('native history, binding, pagination, queue ordering, idempotency, steering and recovery',async()=>{
   const h=await harness();try{
     const p=await h.app.files.register(h.root,'test'),w=h.app.workbench;const first=(await w.create({projectId:p.id})).thread,second=(await w.create({projectId:p.id})).thread;
-    const input={requestId:'request-first',projectId:p.id,text:'one'};await w.enqueue(first.id,input);await delay(30);
-    await w.enqueue(second.id,{requestId:'request-second',projectId:p.id,text:'two'});await delay(20);
+    const input={requestId:'request-first',projectId:p.id,text:'one'};await w.enqueue(first.id,input);
+    await waitFor(()=>h.app.store.submission('request-first').status==='running','first queued task did not start');
+    await w.enqueue(second.id,{requestId:'request-second',projectId:p.id,text:'two'});
     assert.equal(h.rpc.calls.filter(c=>c.method==='turn/start').length,1);assert.equal(h.app.store.submission('request-second').status,'queued');
     assert.equal((await w.enqueue(first.id,input)).id,'request-first');assert.equal(h.rpc.calls.filter(c=>c.method==='turn/start').length,1);
     await assert.rejects(w.enqueue(first.id,{...input,text:'changed'}),e=>e.status===409);
     await w.steer(first.id,{text:'additional'});assert.equal(h.rpc.calls.at(-1).method,'turn/steer');
-    h.rpc.complete(first.id);await delay(40);assert.equal(h.rpc.calls.filter(c=>c.method==='turn/start').length,2);
-    await w.stop(second.id);await delay(20);assert.equal(h.app.store.submission('request-second').status,'interrupted');
+    h.rpc.complete(first.id);await waitFor(()=>h.app.store.submission('request-second').status==='running','second queued task did not start');assert.equal(h.rpc.calls.filter(c=>c.method==='turn/start').length,2);
+    await w.stop(second.id);await waitFor(()=>h.app.store.submission('request-second').status==='interrupted','stopped task did not settle');assert.equal(h.app.store.submission('request-second').status,'interrupted');
     const history=await w.history(first.id);assert.equal(history.turns[0].items[0].content[0].text,'one');assert.equal((await w.list({})).data.length,2);
     await w.action(first.id,{action:'rename',name:'renamed'});await w.action(first.id,{action:'pin',pinned:true});assert.equal((await w.list({})).pinnedData[0].pinned,true);
     const migrated=(await h.rpc.call('thread/start',{cwd:'C:\\old-project'})).thread;await assert.rejects(w.resolveProject(migrated.id,p.id),e=>e.status===409);await w.bind(migrated.id,p.id);assert.equal((await w.resolveProject(migrated.id)).id,p.id);
     await w.action(first.id,{action:'archive'});const archived=await w.list({archived:'true'});assert.equal(archived.data.length+archived.pinnedData.length,1);await w.action(first.id,{action:'unarchive'});
-    await w.enqueue(first.id,{requestId:'request-lost',projectId:p.id,text:'disconnect'});await delay(20);h.rpc.emit('lost');assert.equal(h.app.store.submission('request-lost').status,'uncertain');
+    await w.enqueue(first.id,{requestId:'request-lost',projectId:p.id,text:'disconnect'});await waitFor(()=>h.app.store.submission('request-lost').status==='running','task did not start before disconnect');h.rpc.emit('lost');assert.equal(h.app.store.submission('request-lost').status,'uncertain');
     const before=h.rpc.calls.filter(c=>c.method==='turn/start').length;await w.drain();assert.equal(h.rpc.calls.filter(c=>c.method==='turn/start').length,before);
   }finally{await h.cleanup();}
 });
