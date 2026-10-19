@@ -1,6 +1,12 @@
 import { test,expect } from '@playwright/test';
 import { resolve } from 'node:path';
 test.beforeEach(async({page})=>{await page.goto('/');await page.getByRole('textbox',{name:'访问口令'}).fill('test-password-12345678');await page.getByRole('button',{name:'进入工作台'}).click();await expect(page.getByRole('button',{name:'新建会话'})).toBeVisible();});
+test.afterEach(async({page})=>{
+  const session=await page.request.get('/api/v2/auth/session');if(session.status()===401)return;
+  expect(session.ok()).toBe(true);const {csrf}=await session.json();
+  const response=await page.request.post('/api/v2/auth/logout',{headers:{Origin:new URL(page.url()).origin,'X-CSRF-Token':csrf},data:{}});
+  expect(response.ok()).toBe(true);
+});
 test('desktop workbench reads native history and displays markdown/code',async({page})=>{
   await page.getByRole('button',{name:'已有原生会话',exact:true}).click();await expect(page.getByText('这是已经保存的原生历史。')).toBeVisible();await expect(page.locator('table')).toBeVisible();await expect(page.locator('.code-block')).toBeVisible();
   await page.screenshot({path:resolve('../..','work','workbench-desktop.png'),fullPage:true});
