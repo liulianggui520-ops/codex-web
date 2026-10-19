@@ -1,5 +1,7 @@
 import http from 'node:http';
 import {UpdateClient} from './update-client.mjs';
+import {ProjectRemoval} from './project-removal.mjs';
+import {homedir} from 'node:os';
 import {version,release} from './release.mjs';
 import { readFile, stat, mkdir } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -30,6 +32,7 @@ export async function createApp(options = {}) {
   const protocol = JSON.parse(await readFile(join(here,'..','protocol','methods.json'),'utf8'));
   const workbench = new Workbench(store,rpc,files,events,protocol.methods);
   const updates=options.updates||new UpdateClient();
+  const removal=new ProjectRemoval(store,files,[config.dataDir,join(homedir(),'.codex'),...(config.codexHome?[config.codexHome]:[]),join(here,'..'),...process.platform==='linux'?['/opt/codex-workbench','/var/lib/codex-workbench','/var/lib/codex-workbench-updater']:[]]);
   let mutations=0,applying=false,applyPending=false;
   const json = (res,status,data) => { res.writeHead(status,{ 'Content-Type':'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); };
   const server = http.createServer(async (req,res) => {
@@ -46,6 +49,7 @@ export async function createApp(options = {}) {
         if (pathname === '/api/v2/auth/session' && req.method === 'GET') { json(res,200,{ csrf:session.csrf, projects:store.projects(), preferences:store.get('preferences',{}), roots:config.roots }); return; }
         if (pathname === '/api/v2/auth/logout' && req.method === 'POST') { auth.logout(req,res); for(const client of ws.clients)if(client.session.token===session.token)client.close(1008,'signed out'); json(res,200,{}); return; }
         if(req.method==='POST'&&!['/api/v2/updates/check','/api/v2/preferences'].includes(pathname)){
+          check(!removal.busy,'正在删除项目文件夹，请稍后重试',409);
           mutations++;mutation=true;
           const state=await updates.request();
           if(!applyPending&&!state.busy){applying=false;workbench.maintenance=false;}
@@ -62,6 +66,7 @@ export async function createApp(options = {}) {
           else if (pathname === '/api/v2/account/limits') result=redact(await workbench.supported('account/rateLimits/read',{}));
           else if (pathname === '/api/v2/projects') result = { projects:store.projects() };
           else if (pathname === '/api/v2/projects/directories') result=await files.directories(query.directory,query.q);
+          else if(parts[0]==='projects'&&parts.length===3&&parts[2]==='removal-preview')result=await removal.preview(parts[1]);
           else if (pathname === '/api/v2/threads') result = await workbench.list(query);
           else if (parts[0] === 'threads' && parts.length === 2) result = await workbench.history(parts[1],query.cursor);
           else if (pathname === '/api/v2/queue') result = { jobs:store.jobs() };
@@ -89,7 +94,11 @@ export async function createApp(options = {}) {
           else if (pathname === '/api/v2/connect') { await workbench.connect(); await workbench.reconcile(); workbench.drain(); result = { connected:true }; }
           else if (pathname === '/api/v2/preferences') { const preferences = { theme:input.theme === 'light' ? 'light' : 'dark', sidebar:Math.max(200,Math.min(400,Number(input.sidebar)||250)), inspector:Math.max(280,Math.min(700,Number(input.inspector)||360)), terminal:Math.max(150,Math.min(600,Number(input.terminal)||230)) }; store.set('preferences',preferences); result = preferences; }
           else if (pathname === '/api/v2/projects') { result = await files.register(input.directory,input.name); events.push('projects/changed',{}); }
-          else if (parts[0]==='projects'&&parts.length===3&&parts[2]==='remove') result=workbench.removeProject(parts[1]);
+          else if (parts[0]==='projects'&&parts.length===3&&parts[2]==='remove') {
+            check(input.deleteFiles===undefined||typeof input.deleteFiles==='boolean','deleteFiles 必须是布尔值');
+            if(input.deleteFiles){check(mutations===1,'其他操作正在执行，请稍后再删除文件夹',409);result=await removal.remove(parts[1],input,()=>workbench.assertDirectoryRemovalIdle(),()=>workbench.finishProjectRemoval(parts[1]));}
+            else result=workbench.removeProject(parts[1]);
+          }
           else if (pathname === '/api/v2/threads') result = await workbench.create(input);
           else if (parts[0] === 'threads' && parts.length === 3) {
             const thread = parts[1];
@@ -151,7 +160,7 @@ export async function createApp(options = {}) {
   };
   events.on('event',broadcast);
   const heartbeat = setInterval(() => { for (const client of ws.clients) { const live = store.db.prepare('SELECT 1 FROM sessions WHERE token=? AND expires>?').get(client.session.token,Date.now()); if (!live) client.close(1008,'session expired'); else client.ping(); } },30000); heartbeat.unref();
-  return { server,store,workbench,files,git,events,rpc,config,auth,
+  return { server,store,workbench,files,git,events,rpc,config,auth,removal,
     async close() { clearInterval(heartbeat); events.off('event',broadcast); for (const client of ws.clients) client.terminate(); ws.close(); workbench.close(); server.closeAllConnections(); await new Promise(r => server.close(r)); store.close(); } };
 }
 async function main() {

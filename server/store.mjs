@@ -22,7 +22,7 @@ export class Store {
   addProject(project) { this.db.prepare('INSERT INTO projects VALUES(?,?,?)').run(project.id, project.name, project.path); return project; }
   removeProject(id) {
     this.db.exec('BEGIN IMMEDIATE');
-    try { this.db.prepare('DELETE FROM bindings WHERE project=?').run(id);this.db.prepare('DELETE FROM projects WHERE id=?').run(id);this.db.exec('COMMIT'); }
+    try { this.db.prepare('DELETE FROM bindings WHERE project=?').run(id);this.db.prepare('DELETE FROM projects WHERE id=?').run(id);this.db.prepare('DELETE FROM kv WHERE key=?').run('project-removal/'+id);this.db.exec('COMMIT'); }
     catch(error){this.db.exec('ROLLBACK');throw error;}
   }
   binding(thread) { return this.db.prepare('SELECT project FROM bindings WHERE thread=?').get(thread)?.project; }

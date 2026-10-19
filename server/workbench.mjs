@@ -75,9 +75,23 @@ export class Workbench {
   hasJob(threadId) { return this.store.jobs().some(j => j.thread === threadId && ['queued','starting','running','uncertain'].includes(j.status)); }
   removeProject(projectId) {
     this.files.project(projectId);
+    check(!this.store.get('project-removal/'+projectId),'此项目有未完成的文件夹删除，请重试删除或由管理员恢复目录',409);
     check(!this.store.jobs().some(j=>j.project===projectId&&['queued','starting','running','uncertain'].includes(j.status))&&![...this.terminals.values()].some(t=>t.projectId===projectId&&['running','starting'].includes(t.status))&&![...this.threadMutations].some(thread=>this.store.binding(thread)===projectId),'请先完成或取消此项目的任务，并结束终端，再删除项目',409);
+    return this.finishProjectRemoval(projectId);
+  }
+  finishProjectRemoval(projectId) {
     this.store.removeProject(projectId);for(const [thread,loaded]of this.loaded)if(loaded.projectId===projectId)this.loaded.delete(thread);this.pinScans.clear();
     this.events.push('projects/changed',{removed:projectId});this.events.push('threads/changed',{});return {ok:true};
+  }
+  async assertDirectoryRemovalIdle(){
+    check(!this.active.size&&!this.draining&&!this.threadMutations.size&&!this.pending.size&&!this.store.jobs().some(j=>['queued','starting','running','uncertain'].includes(j.status))&&![...this.terminals.values()].some(t=>['running','starting'].includes(t.status)),'请先完成或取消所有工作台任务，并结束终端，再删除文件夹',409);
+    let cursor;const seen=new Set();
+    do{
+      const page=await this.supported('thread/loaded/list',{limit:100,...(cursor?{cursor}:{})});
+      check(Array.isArray(page.data),'无法核对 Codex 活动会话，请稍后重试',503);
+      for(const id of page.data){const thread=await this.thread(id);check(thread.status?.type!=='active','Codex 仍有活动任务，请先完成或停止后再删除文件夹',409);}
+      cursor=page.nextCursor;if(cursor){check(!seen.has(cursor)&&seen.size<100,'活动会话较多或分页异常，请稍后重试',409);seen.add(cursor);}
+    }while(cursor);
   }
   async bind(threadId, projectId) {
     check(!this.threadMutations.has(threadId) && !this.hasJob(threadId), '请先处理此会话的运行、排队或待确认任务再绑定项目',409);

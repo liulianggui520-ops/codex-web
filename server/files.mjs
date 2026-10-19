@@ -10,9 +10,11 @@ const imageType = name => ({ '.png':'image/png','.jpg':'image/jpeg','.jpeg':'ima
 async function readBounded(handle, limit) { const bytes=Buffer.alloc(limit+1);let count=0;while(count<bytes.length){const result=await handle.read(bytes,count,bytes.length-count,count);if(!result.bytesRead)break;count+=result.bytesRead;}check(count<=limit,'文件超过读取上限',413);return bytes.subarray(0,count); }
 export class Files {
   constructor(store, roots) { this.store = store; this.roots = roots; this.saves = new Set(); }
-  project(id) { const project = this.store.project(id); check(project, '项目不存在', 404); return project; }
+  project(id) { check(!this.removing,'正在删除项目文件夹，请稍后重试',409);const project = this.store.project(id); check(project, '项目不存在', 404);check(!this.store.get('project-removal/'+id),'此项目的文件夹删除尚未完成，请先重试删除或恢复目录',409);return project; }
   async register(directory, name) {
+    check(!this.removing,'正在删除项目文件夹，请稍后重试',409);
     const root = await realpath(text(directory, 4096));
+    check(!root.split(path.sep).some(part=>part.startsWith('.codex-project-delete-')),'不能登记删除恢复目录，请先完成删除或由管理员恢复',403);
     check((await stat(root)).isDirectory(), '项目必须是目录');
     const allowed = await Promise.all(this.roots.map(r => realpath(r)));
     check(allowed.some(r => inside(r, root)), '项目不在允许的工作目录内', 403);
@@ -27,7 +29,7 @@ export class Files {
     const search=text(query,100).toLocaleLowerCase(),entries=[];let scanned=0,truncated=false;
     for await(const entry of await opendir(canonical)){
       if(++scanned>5000){truncated=true;break;}
-      if(!entry.isDirectory()||entry.isSymbolicLink()||entry.name==='.git'||entry.name==='node_modules'||!entry.name.toLocaleLowerCase().includes(search))continue;
+      if(!entry.isDirectory()||entry.isSymbolicLink()||entry.name==='.git'||entry.name==='node_modules'||entry.name.startsWith('.codex-project-delete-')||!entry.name.toLocaleLowerCase().includes(search))continue;
       if(entries.length===200){truncated=true;break;}entries.push({name:entry.name,path:path.join(canonical,entry.name)});
     }
     entries.sort((a,b)=>a.name.localeCompare(b.name));const parent=path.dirname(canonical);

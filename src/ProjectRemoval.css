@@ -1,0 +1,12 @@
+.project-removal-path{display:block;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);white-space:pre-wrap;overflow-wrap:anywhere;user-select:all;font-size:12px}
+.project-removal .check-label{font-size:13px;line-height:1.6;align-items:flex-start;margin:20px 0 12px;cursor:pointer}
+.project-removal .check-label input{margin-top:4px;flex:none}
+.project-removal-warning{border:1px solid var(--danger);border-radius:9px;padding:0 13px 13px;background:color-mix(in srgb,var(--danger) 6%,var(--panel));margin:14px 0}
+.project-removal-warning p{color:var(--danger)}
+.project-removal-warning label{font-size:12px;line-height:1.8}
+.project-removal-warning input{margin-top:7px;width:100%;min-width:0;font-family:monospace}
+.project-removal .inline-error code{overflow-wrap:anywhere}
+.project-removal>.button-row{justify-content:flex-end;gap:10px;margin-top:22px;flex-wrap:wrap}
+.project-removal .danger-button{background:var(--danger);color:var(--bg);border-color:var(--danger)}
+.project-removal .danger-button:hover{background:var(--danger);border-color:var(--danger);filter:brightness(1.08)}
+@media(max-width:1000px){.project-removal>.button-row>button{flex:1;min-height:42px}.project-removal .check-label{font-size:13px}.project-removal-path{font-size:11px}}

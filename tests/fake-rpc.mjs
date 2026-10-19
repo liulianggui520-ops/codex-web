@@ -4,6 +4,7 @@ export class FakeRpc extends EventEmitter {
   async connect(){this.ready=true;return this;}
   async call(method,params={}) {
     this.calls.push({method,params});
+    if(method==='thread/loaded/list')return{data:[...this.chats.keys()],nextCursor:null};
     if(method==='model/list')return{data:[{id:'fixture',model:'fixture-model',displayName:'Fixture model',isDefault:true,defaultReasoningEffort:'medium',supportedReasoningEfforts:[{reasoningEffort:'medium',description:'默认'}]}]};
     if(method==='collaborationMode/list')return{data:[{name:'Plan',mode:'plan',model:'fixture-model'}]};
     if(method==='permissionProfile/list')return{data:[{id:'read-only',allowed:true,description:'只读'}]};

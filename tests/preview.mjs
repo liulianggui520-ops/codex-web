@@ -9,6 +9,7 @@ const work=resolve(fileURLToPath(new URL('../../../work/',import.meta.url)));awa
 const base=await mkdtemp(join(work,'browser-fixture-')),root=join(base,'example-project');await mkdir(root);
 await writeFile(join(root,'README.md'),'# Example project\n\nA small project for browser verification.\n');await writeFile(join(root,'app.js'),'console.log("Hello, Codex");\n');
 await mkdir(join(root,'quick-project'));await writeFile(join(root,'quick-project','README.md'),'# Quick directory project\n');
+await mkdir(join(root,'delete-project'));await writeFile(join(root,'delete-project','README.md'),'# Disposable project\n');
 execFileSync('git',['init','-b','main',root],{stdio:'ignore'});
 const rpc=new FakeRpc(root);rpc.autoComplete=true;
 const app=await createApp({rpc,config:{dataDir:join(base,'state'),roots:[root],cwd:root,origin:'http://127.0.0.1:47834'}});

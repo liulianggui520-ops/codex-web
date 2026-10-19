@@ -17,6 +17,7 @@ import { Rpc } from '../server/rpc.mjs';
 import {updateSocket} from './helpers/update-socket.mjs';
 import {probeWebHealth} from '../server/update-health.mjs';
 import {version,release} from '../server/release.mjs';
+import {homedir} from 'node:os';
 const exec=promisify(execFile),scratch=resolve(process.env.TEST_TMPDIR||fileURLToPath(new URL('../../../work/',import.meta.url)));
 async function waitFor(predicate,message){
   const deadline=Date.now()+5000;
@@ -243,6 +244,37 @@ test('directory browsing is confined and project removal preserves files/history
     assert.equal((await h.request(`/api/v2/projects/${p.id}/remove`,{})).status,200);assert.equal(h.app.store.project(p.id),undefined);assert.equal(h.app.store.binding(t.id),undefined);assert.equal(await readFile(join(child,'keep.txt'),'utf8'),'keep this file');assert.equal((await w.history(t.id)).thread.id,t.id);
     const again=await h.app.files.register(child,'again');await w.enqueue(t.id,{projectId:again.id,requestId:'re-register-send',text:'continue'});await delay(20);assert.equal(h.app.store.submission('re-register-send').status,'running');
   }finally{await h.cleanup();}
+});
+
+test('physical project deletion requires authenticated exact path confirmation and retains native history',async()=>{
+  const h=await harness();try{
+    assert.ok(h.app.removal.protectedPaths.includes(join(homedir(),'.codex')));
+    const child=join(h.root,'delete-files');await mkdir(child);await writeFile(join(child,'delete.txt'),'remove this');const p=await h.app.files.register(child,'delete-files'),thread=(await h.app.workbench.create({projectId:p.id})).thread;
+    const endpoint=`/api/v2/projects/${p.id}`,preview=endpoint+'/removal-preview';assert.equal((await h.request(preview)).status,401);await h.login();
+    const info=(await h.request(preview)).data;assert.equal(info.canDeleteFiles,true);
+    assert.equal((await h.request(endpoint+'/remove',{deleteFiles:'true'})).status,400);
+    assert.equal((await h.request(endpoint+'/remove',{deleteFiles:true,confirmationPath:h.root,etag:info.etag})).status,400);
+    assert.equal((await h.request(endpoint+'/remove',{deleteFiles:true,confirmationPath:p.path})).status,409);
+    const result=await h.request(endpoint+'/remove',{deleteFiles:true,confirmationPath:p.path,etag:info.etag});assert.equal(result.status,200,JSON.stringify(result.data));assert.equal(result.data.filesDeleted,true);
+    await assert.rejects(readFile(join(child,'delete.txt')),error=>error.code==='ENOENT');assert.equal(h.app.store.project(p.id),undefined);assert.equal(h.app.store.binding(thread.id),undefined);assert.equal((await h.app.workbench.history(thread.id)).thread.id,thread.id);
+  }finally{await h.cleanup();}
+});
+
+test('physical deletion blocks native active tasks, parent terminals and concurrent HTTP writes',async()=>{
+  const h=await harness();let release;
+  try{
+    await h.login();const parent=await h.app.files.register(h.root,'parent'),folder=join(h.root,'remove-child');await mkdir(folder);await writeFile(join(folder,'file.txt'),'keep until confirmed');const p=await h.app.files.register(folder,'child'),w=h.app.workbench,thread=(await w.create({projectId:parent.id})).thread;
+    const endpoint=`/api/v2/projects/${p.id}`,info=(await h.request(endpoint+'/removal-preview')).data,input={deleteFiles:true,confirmationPath:p.path,etag:info.etag};
+    h.rpc.chats.get(thread.id).status={type:'active'};assert.equal((await h.request(endpoint+'/remove',input)).status,409);h.rpc.chats.get(thread.id).status={type:'idle'};
+    const terminal=await w.terminalCreate(parent.id);assert.equal((await h.request(endpoint+'/remove',input)).status,409);await w.terminalAction(terminal.id,{action:'kill'});
+    const call=h.rpc.call.bind(h.rpc);let started;const gate=new Promise(resolve=>release=resolve),ready=new Promise(resolve=>started=resolve);
+    h.rpc.call=async(method,params)=>{if(method==='thread/loaded/list'){started();await gate;}return call(method,params);};
+    const deleting=h.request(endpoint+'/remove',input);await ready;
+    try{
+      for(const [url,body]of [['/api/v2/projects',{directory:h.root}],['/api/v2/threads',{projectId:parent.id}],['/api/v2/terminals',{projectId:parent.id}],['/api/v2/files/save',{projectId:parent.id,path:'new.txt',text:'no'}],['/api/v2/git/action',{projectId:parent.id,action:'commit',message:'no'}],[endpoint+'/remove',input]])assert.equal((await h.request(url,body)).status,409,url);
+    }finally{release();}
+    assert.equal((await deleting).status,200);assert.equal(h.app.files.removing,false);
+  }finally{release?.();await h.cleanup();}
 });
 test('late thread creation cannot bind a project removed while the native request was pending',async()=>{
   const h=await harness();try{const p=await h.app.files.register(h.root,'test'),original=h.rpc.call.bind(h.rpc);let release,started;const gate=new Promise(r=>release=r),ready=new Promise(r=>started=r);h.rpc.call=async(method,params)=>{const result=await original(method,params);if(method==='thread/start'){started();await gate;}return result;};const pending=h.app.workbench.create({projectId:p.id});await ready;h.app.workbench.removeProject(p.id);release();await assert.rejects(pending,e=>e.status===404);assert.equal(h.app.store.binding('chat-1'),undefined);}finally{await h.cleanup();}
